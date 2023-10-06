@@ -1,0 +1,119 @@
+const NotFoundError = require("../../errors/not-found");
+const UnauthorizedError = require("../../errors/unauthorized");
+const jwt = require("jsonwebtoken");
+const config = require("../../config");
+const usersService = require("./users.service");
+const express = require("express");
+const router = express.Router();
+const articlesService = require("../articles/articles.service");
+
+class UsersController {
+  async getAll(req, res, next) {
+    try {
+      const users = await usersService.getAll();
+      res.json(users);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getById(req, res, next) {
+    try {
+      const id = req.params.id;
+      const user = await usersService.get(id);
+      if (!user) {
+        throw new NotFoundError();
+      }
+      res.json(user);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async create(req, res, next) {
+    try {
+      const userId = req.user._id;
+      const userData = {
+        createdBy: userId,
+      };
+
+      const user = await usersService.create(userData);
+      user.password = undefined;
+      req.io.emit("user:create", user);
+      res.status(201).json(user);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async update(req, res, next) {
+    try {
+      const id = req.params.id;
+      const data = req.body;
+
+      if (req.user && req.user.role === "admin") {
+        const userModified = await usersService.update(id, data);
+        userModified.password = undefined;
+        res.json(userModified);
+      } else {
+        throw new UnauthorizedError(
+          "Seuls les administrateurs sont autorisés."
+        );
+      }
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async delete(req, res, next) {
+    try {
+      const id = req.params.id;
+
+      if (req.user && req.user.role === "admin") {
+        await usersService.delete(id);
+        req.io.emit("user:delete", { id });
+        res.status(204).send();
+      } else {
+        throw new UnauthorizedError(
+          "Seuls les administrateurs sont autorisés."
+        );
+      }
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async login(req, res, next) {
+    try {
+      const { email, password } = req.body;
+      const userId = await usersService.checkPasswordUser(email, password);
+      if (!userId) {
+        throw new UnauthorizedError();
+      }
+      const token = jwt.sign({ userId }, config.secretJwtToken, {
+        expiresIn: "3d",
+      });
+      res.json({
+        token,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+  async userId(req, res, next) {
+    try {
+      const userId = req.params.userId;
+      const articles = await articlesService.getArticlesByUserId(userId);
+      res.json(articles);
+    } catch (err) {
+      next(err);
+    }
+  }
+}
+
+module.exports = new UsersController();
+
+// module.exports = {
+//   UsersController,
+//   router,
+// };
